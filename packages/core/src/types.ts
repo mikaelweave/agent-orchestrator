@@ -906,6 +906,7 @@ export interface NotifierConfig {
 export interface AgentSpecificConfig {
   permissions?: "skip" | "default";
   model?: string;
+  yolo?: boolean;
   [key: string]: unknown;
 }
 
