@@ -18,7 +18,7 @@ port: 3000
 # Default plugins (these are the defaults — you can omit this section)
 defaults:
   runtime: tmux           # tmux | process | docker | kubernetes | ssh | e2b
-  agent: claude-code      # claude-code | codex | aider | goose | custom
+  agent: claude-code      # claude-code | codex | aider | copilot | goose | custom
   workspace: worktree     # worktree | clone | copy
   notifiers: [desktop]    # desktop | slack | discord | webhook | email
 
@@ -45,8 +45,22 @@ projects:
 
     # Agent-specific config
     # agentConfig:
-    #   permissions: skip    # --dangerously-skip-permissions
-    #   model: opus
+    #   permissions: skip    # --dangerously-skip-permissions (claude-code / codex)
+    #   model: opus          # model override (any agent that supports --model)
+    #
+    # GitHub Copilot agent example:
+    # agent: copilot
+    # agentConfig:
+    #   # Copilot supports multiple AI models. Choose from:
+    #   #   gpt-4o              — OpenAI GPT-4o (default)
+    #   #   o3-mini             — OpenAI o3 Mini
+    #   #   o1                  — OpenAI o1
+    #   #   claude-3.5-sonnet   — Anthropic Claude 3.5 Sonnet (via Copilot)
+    #   #   gemini-2.0-flash    — Google Gemini 2.0 Flash (via Copilot)
+    #   model: gpt-4o
+    #
+    # Prerequisites for the copilot agent:
+    #   gh extension install github/gh-copilot
 
     # Inline rules included in every agent prompt for this project
     # agentRules: |
