@@ -29,7 +29,7 @@ const AO_BIN_DIR = join(homedir(), ".ao", "bin");
 export const manifest = {
   name: "copilot",
   slot: "agent" as const,
-  description: "Agent plugin: GitHub Copilot CLI (gh copilot)",
+  description: "Agent plugin: GitHub Copilot CLI",
   version: "0.1.0",
 };
 
@@ -268,6 +268,10 @@ async function setupCopilotWorkspace(workspacePath: string): Promise<void> {
   }
 }
 
+function readBool(value: unknown): boolean {
+  return value === true;
+}
+
 // =============================================================================
 // Agent Implementation
 // =============================================================================
@@ -275,13 +279,10 @@ async function setupCopilotWorkspace(workspacePath: string): Promise<void> {
 function createCopilotAgent(): Agent {
   return {
     name: "copilot",
-    // The gh copilot extension runs as the "gh" process
-    processName: "gh",
+    processName: "copilot",
 
     getLaunchCommand(config: AgentLaunchConfig): string {
-      // gh copilot suggest runs interactively in the terminal session.
-      // --target shell keeps suggestions focused on shell commands for coding tasks.
-      const parts: string[] = ["gh", "copilot", "suggest", "--target", "shell"];
+      const parts: string[] = ["copilot"];
 
       if (config.model) {
         // GitHub Copilot supports multiple models: gpt-4o, o3-mini, o1,
@@ -289,8 +290,16 @@ function createCopilotAgent(): Agent {
         parts.push("--model", shellEscape(config.model));
       }
 
+      const yolo = readBool(config.projectConfig.agentConfig?.["yolo"]);
+      if (yolo) {
+        parts.push("--yolo");
+      } else if (config.permissions === "skip") {
+        // Backward compatibility with shared skip/default model.
+        parts.push("--allow-all-tools");
+      }
+
       if (config.prompt) {
-        parts.push(shellEscape(config.prompt));
+        parts.push("-p", shellEscape(config.prompt));
       }
 
       return parts.join(" ");
@@ -366,15 +375,12 @@ function createCopilotAgent(): Agent {
             timeout: 30_000,
           });
           const ttySet = new Set(ttys.map((t) => t.replace(/^\/dev\//, "")));
-          // Match "gh" followed by "copilot" to avoid false positives on other
-          // gh commands or processes that merely contain "gh" in their name.
-          const processRe = /(?:^|\/)gh(?:\s|$)/;
-          const copilotArg = /\bcopilot\b/;
+          const processRe = /(?:^|\/)copilot(?:\s|$)/;
           for (const line of psOut.split("\n")) {
             const cols = line.trimStart().split(/\s+/);
             if (cols.length < 3 || !ttySet.has(cols[1] ?? "")) continue;
             const args = cols.slice(2).join(" ");
-            if (processRe.test(args) && copilotArg.test(args)) {
+            if (processRe.test(args)) {
               return true;
             }
           }

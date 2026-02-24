@@ -45,7 +45,7 @@ projects:
 
     # Agent-specific config
     # agentConfig:
-    #   permissions: skip    # --dangerously-skip-permissions (claude-code / codex)
+    #   permissions: skip    # claude-code: --dangerously-skip-permissions, codex/copilot: automation mode
     #   model: opus          # model override (any agent that supports --model)
     #
     # GitHub Copilot agent example:
@@ -58,9 +58,8 @@ projects:
     #   #   claude-3.5-sonnet   — Anthropic Claude 3.5 Sonnet (via Copilot)
     #   #   gemini-2.0-flash    — Google Gemini 2.0 Flash (via Copilot)
     #   model: gpt-4o
-    #
-    # Prerequisites for the copilot agent:
-    #   gh extension install github/gh-copilot
+    #   permissions: skip       # maps to --allow-all-tools
+    #   # yolo: true            # maps to --yolo (equivalent to --allow-all)
 
     # Inline rules included in every agent prompt for this project
     # agentRules: |

@@ -119,7 +119,7 @@ describe("plugin manifest & exports", () => {
     expect(manifest).toEqual({
       name: "copilot",
       slot: "agent",
-      description: "Agent plugin: GitHub Copilot CLI (gh copilot)",
+      description: "Agent plugin: GitHub Copilot CLI",
       version: "0.1.0",
     });
   });
@@ -127,7 +127,7 @@ describe("plugin manifest & exports", () => {
   it("create() returns agent with correct name and processName", () => {
     const agent = create();
     expect(agent.name).toBe("copilot");
-    expect(agent.processName).toBe("gh");
+    expect(agent.processName).toBe("copilot");
   });
 
   it("default export is a valid PluginModule", () => {
@@ -142,10 +142,8 @@ describe("plugin manifest & exports", () => {
 describe("getLaunchCommand", () => {
   const agent = create();
 
-  it("generates base command with gh copilot suggest --target shell", () => {
-    expect(agent.getLaunchCommand(makeLaunchConfig())).toBe(
-      "gh copilot suggest --target shell",
-    );
+  it("generates base command", () => {
+    expect(agent.getLaunchCommand(makeLaunchConfig())).toBe("copilot");
   });
 
   it("includes --model with shell-escaped value", () => {
@@ -172,12 +170,12 @@ describe("getLaunchCommand", () => {
     const cmd = agent.getLaunchCommand(
       makeLaunchConfig({ model: "gpt-4o", prompt: "Add tests" }),
     );
-    expect(cmd).toBe("gh copilot suggest --target shell --model 'gpt-4o' 'Add tests'");
+    expect(cmd).toBe("copilot --model 'gpt-4o' -p 'Add tests'");
   });
 
   it("escapes single quotes in prompt (POSIX shell escaping)", () => {
     const cmd = agent.getLaunchCommand(makeLaunchConfig({ prompt: "it's broken" }));
-    expect(cmd).toContain("'it'\\''s broken'");
+    expect(cmd).toContain("-p 'it'\\''s broken'");
   });
 
   it("escapes dangerous characters in prompt", () => {
@@ -185,19 +183,52 @@ describe("getLaunchCommand", () => {
       makeLaunchConfig({ prompt: "$(rm -rf /); `evil`; $HOME" }),
     );
     // Single-quoted strings prevent shell expansion
-    expect(cmd).toContain("'$(rm -rf /); `evil`; $HOME'");
+    expect(cmd).toContain("-p '$(rm -rf /); `evil`; $HOME'");
   });
 
   it("omits optional flags when not provided", () => {
     const cmd = agent.getLaunchCommand(makeLaunchConfig());
     expect(cmd).not.toContain("--model");
-    expect(cmd).not.toContain("--full-auto");
+    expect(cmd).not.toContain("--allow-all");
   });
 
-  it("ignores permissions=skip (no equivalent flag for gh copilot)", () => {
+  it("maps permissions=skip to --allow-all-tools", () => {
     const cmd = agent.getLaunchCommand(makeLaunchConfig({ permissions: "skip" }));
-    // No --full-auto or --dangerously-skip-permissions for gh copilot
-    expect(cmd).not.toContain("skip");
+    expect(cmd).toContain("--allow-all-tools");
+  });
+
+  it("supports yolo mode from project agentConfig", () => {
+    const cmd = agent.getLaunchCommand(
+      makeLaunchConfig({
+        projectConfig: {
+          name: "my-project",
+          repo: "owner/repo",
+          path: "/workspace/repo",
+          defaultBranch: "main",
+          sessionPrefix: "my",
+          agentConfig: { yolo: true },
+        },
+      }),
+    );
+    expect(cmd).toContain("--yolo");
+  });
+
+  it("prefers yolo over permissions=skip", () => {
+    const cmd = agent.getLaunchCommand(
+      makeLaunchConfig({
+        permissions: "skip",
+        projectConfig: {
+          name: "my-project",
+          repo: "owner/repo",
+          path: "/workspace/repo",
+          defaultBranch: "main",
+          sessionPrefix: "my",
+          agentConfig: { yolo: true },
+        },
+      }),
+    );
+    expect(cmd).toContain("--yolo");
+    expect(cmd).not.toContain("--allow-all-tools");
   });
 });
 
@@ -251,17 +282,17 @@ describe("getEnvironment", () => {
 describe("isProcessRunning", () => {
   const agent = create();
 
-  it("returns true when 'gh copilot' found on tmux pane TTY", async () => {
-    mockTmuxWithProcess("gh", "copilot suggest --target shell");
+  it("returns true when 'copilot' found on tmux pane TTY", async () => {
+    mockTmuxWithProcess("copilot");
     expect(await agent.isProcessRunning(makeTmuxHandle())).toBe(true);
   });
 
-  it("returns false when gh is running but not copilot subcommand", async () => {
+  it("returns false when gh is running without copilot", async () => {
     mockTmuxWithProcess("gh", "pr list");
     expect(await agent.isProcessRunning(makeTmuxHandle())).toBe(false);
   });
 
-  it("returns false when gh copilot not on tmux pane TTY", async () => {
+  it("returns false when copilot not on tmux pane TTY", async () => {
     mockTmuxWithProcess("bash", "", true);
     expect(await agent.isProcessRunning(makeTmuxHandle())).toBe(false);
   });
@@ -306,7 +337,7 @@ describe("isProcessRunning", () => {
     killSpy.mockRestore();
   });
 
-  it("finds gh copilot on any pane in multi-pane session", async () => {
+  it("finds copilot on any pane in multi-pane session", async () => {
     mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
       if (cmd === "tmux" && args[0] === "list-panes") {
         return Promise.resolve({ stdout: "/dev/ttys001\n/dev/ttys002\n", stderr: "" });
@@ -314,7 +345,7 @@ describe("isProcessRunning", () => {
       if (cmd === "ps") {
         return Promise.resolve({
           stdout:
-            "  PID TT ARGS\n  100 ttys001  bash\n  200 ttys002  gh copilot suggest --model gpt-4o\n",
+            "  PID TT ARGS\n  100 ttys001  bash\n  200 ttys002  copilot --model gpt-4o\n",
           stderr: "",
         });
       }
@@ -323,14 +354,14 @@ describe("isProcessRunning", () => {
     expect(await agent.isProcessRunning(makeTmuxHandle())).toBe(true);
   });
 
-  it("does not match 'gh' without 'copilot' argument", async () => {
+  it("does not match commands that merely mention copilot in args", async () => {
     mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
       if (cmd === "tmux" && args[0] === "list-panes") {
         return Promise.resolve({ stdout: "/dev/ttys001\n", stderr: "" });
       }
       if (cmd === "ps") {
         return Promise.resolve({
-          stdout: "  PID TT ARGS\n  100 ttys001  gh pr status\n",
+          stdout: "  PID TT ARGS\n  100 ttys001  bash -c 'echo copilot'\n",
           stderr: "",
         });
       }
@@ -428,7 +459,7 @@ describe("getActivityState", () => {
   });
 
   it("returns null (unknown) when process is running", async () => {
-    mockTmuxWithProcess("gh", "copilot suggest --target shell");
+    mockTmuxWithProcess("copilot");
     const session = makeSession({ runtimeHandle: makeTmuxHandle() });
     expect(await agent.getActivityState(session)).toBeNull();
   });
