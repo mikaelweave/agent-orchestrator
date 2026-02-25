@@ -838,7 +838,7 @@ export interface ProjectConfig {
   /** Display name */
   name: string;
 
-  /** GitHub repo in "owner/repo" format */
+  /** Repo identifier — "owner/repo" for GitHub; for Azure DevOps use scm config instead */
   repo: string;
 
   /** Local path to the repo */

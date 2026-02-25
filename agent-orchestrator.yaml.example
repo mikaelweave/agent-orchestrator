@@ -41,6 +41,13 @@ projects:
     #   organizationUrl: "https://dev.azure.com/your-org"
     #   project: "your-azure-project-name"
 
+    # SCM — source code management / PR platform (defaults to github)
+    # scm:
+    #   plugin: azure-devops
+    #   organizationUrl: "https://dev.azure.com/your-org"
+    #   project: "your-azure-project-name"
+    #   repositoryName: "your-repo-name"
+
     # Files to symlink into workspaces
     # symlinks: [.env, .claude]
 
