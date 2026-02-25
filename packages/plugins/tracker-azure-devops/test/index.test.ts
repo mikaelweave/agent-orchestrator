@@ -1,10 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { EventEmitter } from "node:events";
 
-const { requestMock } = vi.hoisted(() => ({ requestMock: vi.fn() }));
+const { requestMock, execFileMock } = vi.hoisted(() => ({
+  requestMock: vi.fn(),
+  execFileMock: vi.fn(),
+}));
 
 vi.mock("node:https", () => ({
   request: requestMock,
+}));
+
+vi.mock("node:child_process", () => ({
+  execFile: execFileMock,
 }));
 
 import { create, manifest } from "../src/index.js";
@@ -98,7 +105,7 @@ describe("tracker-azure-devops plugin", () => {
   });
 
   describe("getIssue", () => {
-    it("returns Issue with mapped fields", async () => {
+    it("returns Issue with mapped fields (PAT path)", async () => {
       mockAzureDevOpsResponse(sampleWorkItem);
       const issue = await tracker.getIssue("123", project);
 
@@ -113,9 +120,45 @@ describe("tracker-azure-devops plugin", () => {
       });
     });
 
-    it("throws when PAT is missing", async () => {
+    it("falls back to az CLI when PAT is not set", async () => {
       delete process.env["AZURE_DEVOPS_PAT"];
-      await expect(tracker.getIssue("123", project)).rejects.toThrow("AZURE_DEVOPS_PAT");
+      execFileMock.mockImplementationOnce(
+        (
+          _cmd: string,
+          _args: string[],
+          _opts: Record<string, unknown>,
+          cb: (err: Error | null, result: { stdout: string }) => void,
+        ) => {
+          cb(null, { stdout: JSON.stringify(sampleWorkItem) });
+        },
+      );
+
+      const issue = await tracker.getIssue("123", project);
+
+      expect(execFileMock).toHaveBeenCalledWith(
+        "az",
+        expect.arrayContaining(["boards", "work-item", "show", "--id", "123"]),
+        expect.objectContaining({ timeout: 30_000 }),
+        expect.any(Function),
+      );
+      expect(issue.id).toBe("123");
+      expect(issue.title).toBe("Fix login bug");
+    });
+
+    it("throws when az CLI fails and no PAT", async () => {
+      delete process.env["AZURE_DEVOPS_PAT"];
+      execFileMock.mockImplementationOnce(
+        (
+          _cmd: string,
+          _args: string[],
+          _opts: Record<string, unknown>,
+          cb: (err: Error | null) => void,
+        ) => {
+          cb(new Error("az not found"));
+        },
+      );
+
+      await expect(tracker.getIssue("123", project)).rejects.toThrow("az not found");
     });
   });
 

@@ -1,11 +1,16 @@
 /**
  * tracker-azure-devops plugin — Azure DevOps Work Items as an issue tracker.
  *
- * Uses the Azure DevOps Work Item REST API with PAT authentication.
+ * Uses PAT authentication when AZURE_DEVOPS_PAT is set, otherwise falls back
+ * to the Azure CLI (`az boards`).
  */
 
+import { execFile } from "node:child_process";
 import { request } from "node:https";
+import { promisify } from "node:util";
 import type { PluginModule, Tracker, Issue, ProjectConfig } from "@composio/ao-core";
+
+const execFileAsync = promisify(execFile);
 
 const API_VERSION = "7.1";
 const WORK_ITEM_FIELDS = [
@@ -56,12 +61,17 @@ function getTrackerSettings(project: ProjectConfig): TrackerSettings {
   return { organizationUrl, projectName };
 }
 
-function getPat(): string {
+function getPat(): string | null {
   const pat = process.env["AZURE_DEVOPS_PAT"];
   if (!pat || pat.trim() === "") {
-    throw new Error("AZURE_DEVOPS_PAT environment variable is required for Azure DevOps tracker");
+    return null;
   }
   return pat;
+}
+
+async function az(args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync("az", args, { timeout: 30_000 });
+  return stdout;
 }
 
 function normalizeIdentifier(identifier: string): string {
@@ -155,10 +165,11 @@ function toIssue(item: AzureDevOpsWorkItem, settings: TrackerSettings): Issue {
 function requestAzureDevOps<T>(
   method: "GET" | "POST" | "PATCH",
   url: URL,
+  pat: string,
   body?: unknown,
 ): Promise<T> {
   const payload = body === undefined ? undefined : JSON.stringify(body);
-  const auth = `Basic ${Buffer.from(`:${getPat()}`).toString("base64")}`;
+  const auth = `Basic ${Buffer.from(`:${pat}`).toString("base64")}`;
 
   return new Promise<T>((resolve, reject) => {
     let settled = false;
@@ -234,14 +245,37 @@ function requestAzureDevOps<T>(
 async function fetchWorkItem(identifier: string, project: ProjectConfig): Promise<Issue> {
   const settings = getTrackerSettings(project);
   const id = normalizeIdentifier(identifier);
+  const pat = getPat();
 
-  const url = new URL(
-    `${settings.organizationUrl}/${encodeURIComponent(settings.projectName)}/_apis/wit/workitems/${id}`,
-  );
-  url.searchParams.set("api-version", API_VERSION);
-  url.searchParams.set("fields", WORK_ITEM_FIELDS.join(","));
+  if (pat) {
+    const url = new URL(
+      `${settings.organizationUrl}/${encodeURIComponent(settings.projectName)}/_apis/wit/workitems/${id}`,
+    );
+    url.searchParams.set("api-version", API_VERSION);
+    url.searchParams.set("fields", WORK_ITEM_FIELDS.join(","));
 
-  const data = await requestAzureDevOps<AzureDevOpsWorkItem>("GET", url);
+    const data = await requestAzureDevOps<AzureDevOpsWorkItem>("GET", url, pat);
+    return toIssue(data, settings);
+  }
+
+  const stdout = await az([
+    "boards",
+    "work-item",
+    "show",
+    "--id",
+    id,
+    "--org",
+    settings.organizationUrl,
+    "--output",
+    "json",
+  ]);
+
+  let data: AzureDevOpsWorkItem;
+  try {
+    data = JSON.parse(stdout) as AzureDevOpsWorkItem;
+  } catch {
+    throw new Error("Failed to parse az boards work-item show output as JSON");
+  }
   return toIssue(data, settings);
 }
 
