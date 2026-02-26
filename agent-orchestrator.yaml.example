@@ -21,6 +21,13 @@ defaults:
   agent: claude-code      # claude-code | codex | aider | copilot | goose | custom
   workspace: worktree     # worktree | clone | copy
   notifiers: [desktop]    # desktop | slack | discord | webhook | email
+  # agentConfig:            # inherited by all projects (project-level overrides)
+  #   permissions: skip
+  #   model: opus
+  #   yolo: true
+  # agentRules: |           # inherited by all projects (project-level overrides)
+  #   Always run tests before pushing.
+  #   Use conventional commits (feat:, fix:, chore:).
 
 # Projects — at minimum, specify repo and path
 projects:
@@ -32,14 +39,22 @@ projects:
     sessionPrefix: app
 
     # Issue tracker (defaults to github issues)
+    tracker:
+      plugin: azure-devops
+      organizationUrl: "https://dev.azure.com/your-org"
+      project: "your-azure-project-name"
+    #
+    # Or use Linear:
     # tracker:
     #   plugin: linear
     #   teamId: "your-team-id"
-    #
-    # tracker:
-    #   plugin: azure-devops
-    #   organizationUrl: "https://dev.azure.com/your-org"
-    #   project: "your-azure-project-name"
+
+    # SCM — source code management / PR platform (defaults to github)
+    scm:
+      plugin: azure-devops
+      organizationUrl: "https://dev.azure.com/your-org"
+      project: "your-azure-project-name"
+      repositoryName: "your-repo-name"
 
     # Files to symlink into workspaces
     # symlinks: [.env, .claude]
@@ -59,10 +74,11 @@ projects:
     #   # Copilot supports multiple AI models. Choose from:
     #   #   gpt-4o              — OpenAI GPT-4o (default)
     #   #   o3-mini             — OpenAI o3 Mini
-    #   #   o1                  — OpenAI o1
-    #   #   claude-3.5-sonnet   — Anthropic Claude 3.5 Sonnet (via Copilot)
-    #   #   gemini-2.0-flash    — Google Gemini 2.0 Flash (via Copilot)
-    #   model: gpt-4o
+    #   #   codex-5.3           — OpenAI Codex 5.3
+    #   #   claude-opus-4.6     — Anthropic Claude Opus 4.6
+    #   #   claude-sonnet-4.6   — Anthropic Claude Sonnet 4.6
+    #   #   gemini-2.0-flash    — Google Gemini 2.0 Flash
+    #   model: claude-opus-4.6
     #   permissions: skip       # maps to --allow-all-tools
     #   # yolo: true            # maps to --yolo (equivalent to --allow-all)
 

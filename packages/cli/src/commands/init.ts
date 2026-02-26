@@ -261,7 +261,7 @@ export function registerInit(program: Command): void {
         // Default plugins
         console.log(chalk.bold("\n  Default Plugins\n"));
         const runtime = await prompt(rl, "Runtime (tmux, process)", "tmux");
-        const agent = await prompt(rl, "Agent (claude-code, codex, aider)", "claude-code");
+        const agent = await prompt(rl, "Agent (claude-code, copilot, codex, aider)", "copilot");
         const workspace = await prompt(rl, "Workspace (worktree, clone)", "worktree");
         const notifiersStr = await prompt(
           rl,
@@ -289,7 +289,7 @@ export function registerInit(program: Command): void {
 
         let projectPath = "";
         if (projectId) {
-          const repo = await prompt(rl, "GitHub repo (owner/repo)", env.ownerRepo || "");
+          const repo = await prompt(rl, "Repo (owner/repo for GitHub, or project name for Azure DevOps)", env.ownerRepo || "");
           projectPath = await prompt(
             rl,
             "Local path to repo",
@@ -353,6 +353,53 @@ export function registerInit(program: Command): void {
           } else {
             // Default to github (no explicit config needed)
           }
+
+          // Ask about SCM
+          console.log(chalk.bold("\n  Source Code Management (PRs, CI, Reviews)\n"));
+          const scmDefault = tracker === "azure-devops" ? "azure-devops" : "github";
+          const scmPlugin = await prompt(
+            rl,
+            "SCM platform (github, azure-devops)",
+            scmDefault,
+          );
+
+          if (scmPlugin === "azure-devops") {
+            // Reuse org/project from tracker if already configured
+            const trackerConfig = projectConfig.tracker as Record<string, unknown> | undefined;
+            const defaultOrg =
+              (trackerConfig?.organizationUrl as string) ||
+              process.env["AZURE_DEVOPS_ORG_URL"] ||
+              "";
+            const defaultProject =
+              (trackerConfig?.project as string) ||
+              process.env["AZURE_DEVOPS_PROJECT"] ||
+              projectId;
+
+            const scmOrg = await prompt(
+              rl,
+              "Azure DevOps organization URL",
+              defaultOrg,
+            );
+            const scmProject = await prompt(
+              rl,
+              "Azure DevOps project name",
+              defaultProject,
+            );
+            const scmRepo = await prompt(
+              rl,
+              "Azure DevOps repository name",
+              process.env["AZURE_DEVOPS_REPOSITORY"] || projectId,
+            );
+            if (scmOrg && scmProject && scmRepo) {
+              projectConfig.scm = {
+                plugin: "azure-devops",
+                organizationUrl: scmOrg,
+                project: scmProject,
+                repositoryName: scmRepo,
+              };
+            }
+          }
+          // github SCM is auto-inferred — no explicit config needed
 
           (config.projects as Record<string, unknown>)[projectId] = projectConfig;
         }
@@ -473,6 +520,35 @@ async function handleAutoMode(outputPath: string, smart: boolean): Promise<void>
   const defaultBranch = env.defaultBranch || "main";
 
   const port = await findFreePort(DEFAULT_PORT);
+
+  // Build project config — auto-detect Azure DevOps when PAT is present
+  const projectConf: Record<string, unknown> = {
+    repo,
+    path,
+    defaultBranch,
+    agentRules,
+  };
+
+  if (env.hasAzureDevOpsPat) {
+    const orgUrl = process.env["AZURE_DEVOPS_ORG_URL"] || "";
+    const azProject = process.env["AZURE_DEVOPS_PROJECT"] || projectId;
+    const azRepo = process.env["AZURE_DEVOPS_REPOSITORY"] || projectId;
+
+    if (orgUrl) {
+      projectConf.tracker = {
+        plugin: "azure-devops",
+        organizationUrl: orgUrl,
+        project: azProject,
+      };
+      projectConf.scm = {
+        plugin: "azure-devops",
+        organizationUrl: orgUrl,
+        project: azProject,
+        repositoryName: azRepo,
+      };
+    }
+  }
+
   const config: Record<string, unknown> = {
     dataDir: "~/.agent-orchestrator",
     worktreeDir: "~/.worktrees",
@@ -484,12 +560,7 @@ async function handleAutoMode(outputPath: string, smart: boolean): Promise<void>
       notifiers: ["desktop"],
     },
     projects: {
-      [projectId]: {
-        repo,
-        path,
-        defaultBranch,
-        agentRules,
-      },
+      [projectId]: projectConf,
     },
   };
 

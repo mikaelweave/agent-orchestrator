@@ -15,7 +15,7 @@ Spawn parallel AI coding agents, each in its own git worktree. Agents autonomous
 
 Agent Orchestrator manages fleets of AI coding agents working in parallel on your codebase. Each agent gets its own git worktree, its own branch, and its own PR. When CI fails, the agent fixes it. When reviewers leave comments, the agent addresses them. You only get pulled in when human judgment is needed.
 
-**Agent-agnostic** (Claude Code, Codex, Aider) · **Runtime-agnostic** (tmux, Docker) · **Tracker-agnostic** (GitHub, Linear)
+**Agent-agnostic** (GitHub Copilot, Claude Code, Codex, Aider) · **Runtime-agnostic** (tmux, Docker) · **Tracker-agnostic** (Azure DevOps, GitHub, Linear)
 
 <!-- TODO: Add dashboard screenshot or terminal GIF showing 10+ sessions with attention zones -->
 
@@ -44,7 +44,7 @@ ao spawn my-project 123
 
 1. **Workspace** creates an isolated git worktree with a feature branch
 2. **Runtime** starts a tmux session (or Docker container)
-3. **Agent** launches Claude Code (or Codex, or Aider) with issue context
+3. **Agent** launches Claude Code (or GitHub Copilot, Codex, Aider) with issue context
 4. Agent works autonomously — reads code, writes tests, creates PR
 5. **Reactions** auto-handle CI failures and review comments
 6. **Notifier** pings you only when judgment is needed
@@ -56,10 +56,10 @@ Eight slots. Every abstraction is swappable.
 | Slot | Default | Alternatives |
 |------|---------|-------------|
 | Runtime | tmux | docker, k8s, process |
-| Agent | claude-code | codex, aider, opencode |
+| Agent | copilot | claude-code, codex, aider, opencode |
 | Workspace | worktree | clone |
-| Tracker | github | linear |
-| SCM | github | — |
+| Tracker | azure-devops | github, linear |
+| SCM | azure-devops | github |
 | Notifier | desktop | slack, composio, webhook |
 | Terminal | iterm2 | web |
 | Lifecycle | core | — |
@@ -74,8 +74,10 @@ port: 3000
 
 defaults:
   runtime: tmux
-  agent: claude-code
+  agent: copilot
   workspace: worktree
+  tracker: azure-devops
+  scm: azure-devops
   notifiers: [desktop]
 
 projects:
@@ -128,7 +130,8 @@ Running one AI agent in a terminal is easy. Running 30 across different issues, 
 - Node.js 20+
 - Git 2.25+
 - tmux (for default runtime)
-- `gh` CLI (for GitHub integration)
+- `gh` CLI (for GitHub Copilot and GitHub integration)
+- `az` CLI (for Azure DevOps integration)
 
 ## Development
 

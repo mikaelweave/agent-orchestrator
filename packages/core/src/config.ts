@@ -87,6 +87,8 @@ const DefaultPluginsSchema = z.object({
   agent: z.string().default("claude-code"),
   workspace: z.string().default("worktree"),
   notifiers: z.array(z.string()).default(["composio", "desktop"]),
+  agentConfig: AgentSpecificConfigSchema.optional(),
+  agentRules: z.string().optional(),
 });
 
 const OrchestratorConfigSchema = z.object({
@@ -149,6 +151,19 @@ function applyProjectDefaults(config: OrchestratorConfig): OrchestratorConfig {
     // Infer tracker from repo if not set (default to github issues)
     if (!project.tracker) {
       project.tracker = { plugin: "github" };
+    }
+
+    // Inherit agentConfig from defaults (project-level values take precedence)
+    const defaultAgentConfig = config.defaults.agentConfig;
+    if (defaultAgentConfig) {
+      project.agentConfig = project.agentConfig
+        ? { ...defaultAgentConfig, ...project.agentConfig }
+        : { ...defaultAgentConfig };
+    }
+
+    // Inherit agentRules from defaults if not set at project level
+    if (!project.agentRules && config.defaults.agentRules) {
+      project.agentRules = config.defaults.agentRules;
     }
   }
 
