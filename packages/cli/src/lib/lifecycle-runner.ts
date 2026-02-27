@@ -25,7 +25,9 @@ export function createLifecycleRunner(options: LifecycleRunnerOptions): Lifecycl
   return {
     async start(): Promise<void> {
       const registry = createPluginRegistry();
-      await registry.loadFromConfig(config, (pkg: string) => import(pkg));
+      await registry.loadFromConfig(config, (pkg: string) =>
+        import(/* webpackIgnore: true */ pkg),
+      );
       const sessionManager = createSessionManager({ config, registry });
       manager = createLifecycleManager({ config, registry, sessionManager });
       manager.start(intervalMs);
