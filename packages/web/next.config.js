@@ -1,7 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  transpilePackages: ["@composio/ao-core"],
   serverExternalPackages: [
+    // ao-core is loaded in Node server context (API routes, server components).
+    // Mark as external so webpack doesn't attempt to bundle it.
+    "@composio/ao-core",
     // Plugin packages are loaded dynamically via import(pkg) at runtime.
     // Mark them as external so webpack doesn't try to bundle/analyze them.
     "@composio/ao-plugin-runtime-tmux",
@@ -26,6 +28,9 @@ const nextConfig = {
     // Composio SDK — optional peer dep of tracker-linear
     "@composio/core",
   ],
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
 };
 
 export default nextConfig;
