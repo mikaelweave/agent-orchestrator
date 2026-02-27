@@ -8,7 +8,15 @@
 import { execFile } from "node:child_process";
 import { request } from "node:https";
 import { promisify } from "node:util";
-import type { PluginModule, Tracker, Issue, ProjectConfig } from "@composio/ao-core";
+import type {
+  PluginModule,
+  Tracker,
+  Issue,
+  IssueComment,
+  IssueFilters,
+  IssueUpdate,
+  ProjectConfig,
+} from "@composio/ao-core";
 
 const execFileAsync = promisify(execFile);
 
@@ -34,6 +42,18 @@ interface AzureDevOpsWorkItem {
       href?: string;
     };
   };
+}
+
+interface AzureDevOpsComment {
+  id: number;
+  text: string;
+  createdDate: string | null;
+  createdBy: AzureDevOpsIdentityRef | null;
+  url: string | null;
+}
+
+interface AzureDevOpsCommentsResponse {
+  comments: AzureDevOpsComment[];
 }
 
 interface TrackerSettings {
@@ -167,6 +187,7 @@ function requestAzureDevOps<T>(
   url: URL,
   pat: string,
   body?: unknown,
+  contentType = "application/json",
 ): Promise<T> {
   const payload = body === undefined ? undefined : JSON.stringify(body);
   const auth = `Basic ${Buffer.from(`:${pat}`).toString("base64")}`;
@@ -190,7 +211,7 @@ function requestAzureDevOps<T>(
           Authorization: auth,
           ...(payload
             ? {
-                "Content-Type": "application/json",
+                "Content-Type": contentType,
                 "Content-Length": Buffer.byteLength(payload),
               }
             : {}),
@@ -335,6 +356,224 @@ function createAzureDevOpsTracker(): Tracker {
       );
 
       return lines.join("\n");
+    },
+
+    async listIssues(filters: IssueFilters, project: ProjectConfig): Promise<Issue[]> {
+      const settings = getTrackerSettings(project);
+      const pat = getPat();
+
+      // Build WIQL query
+      let stateFilter = "";
+      if (filters.workflowStateName) {
+        stateFilter = `AND [System.State] = '${filters.workflowStateName.replace(/'/g, "''")}'`;
+      } else if (filters.state === "closed") {
+        stateFilter = "AND [System.State] IN ('Closed', 'Done', 'Resolved', 'Completed')";
+      } else if (filters.state !== "all") {
+        stateFilter =
+          "AND [System.State] NOT IN ('Closed', 'Done', 'Resolved', 'Completed', 'Removed')";
+      }
+
+      const limit = filters.limit ?? 30;
+      const wiql = `SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = '${settings.projectName.replace(/'/g, "''")}' ${stateFilter} ORDER BY [System.ChangedDate] DESC`;
+
+      let ids: number[];
+
+      if (pat) {
+        const url = new URL(
+          `${settings.organizationUrl}/${encodeURIComponent(settings.projectName)}/_apis/wit/wiql`,
+        );
+        url.searchParams.set("api-version", API_VERSION);
+        url.searchParams.set("$top", String(limit));
+
+        const result = await requestAzureDevOps<{ workItems: Array<{ id: number }> }>(
+          "POST",
+          url,
+          pat,
+          { query: wiql },
+        );
+        ids = result.workItems.slice(0, limit).map((w) => w.id);
+      } else {
+        const stdout = await az([
+          "boards",
+          "query",
+          "--wiql",
+          wiql,
+          "--org",
+          settings.organizationUrl,
+          "--output",
+          "json",
+        ]);
+        const result: Array<{ id: number }> = JSON.parse(stdout);
+        ids = result.slice(0, limit).map((w) => w.id);
+      }
+
+      if (ids.length === 0) return [];
+
+      if (pat) {
+        const url = new URL(`${settings.organizationUrl}/_apis/wit/workitems`);
+        url.searchParams.set("ids", ids.join(","));
+        url.searchParams.set("fields", WORK_ITEM_FIELDS.join(","));
+        url.searchParams.set("api-version", API_VERSION);
+
+        const result = await requestAzureDevOps<{ value: AzureDevOpsWorkItem[] }>(
+          "GET",
+          url,
+          pat,
+        );
+        return result.value.map((item) => toIssue(item, settings));
+      }
+
+      const items = await Promise.all(
+        ids.map((id) =>
+          az([
+            "boards",
+            "work-item",
+            "show",
+            "--id",
+            String(id),
+            "--org",
+            settings.organizationUrl,
+            "--output",
+            "json",
+          ]).then((stdout) => toIssue(JSON.parse(stdout) as AzureDevOpsWorkItem, settings)),
+        ),
+      );
+      return items;
+    },
+
+    async listComments(identifier: string, project: ProjectConfig): Promise<IssueComment[]> {
+      const settings = getTrackerSettings(project);
+      const id = normalizeIdentifier(identifier);
+      const pat = getPat();
+
+      if (pat) {
+        const url = new URL(
+          `${settings.organizationUrl}/${encodeURIComponent(settings.projectName)}/_apis/wit/workitems/${id}/comments`,
+        );
+        url.searchParams.set("api-version", "7.1-preview.3");
+
+        const data = await requestAzureDevOps<AzureDevOpsCommentsResponse>("GET", url, pat);
+        return data.comments.map((c) => ({
+          id: String(c.id),
+          body: c.text,
+          author:
+            c.createdBy?.displayName ?? c.createdBy?.uniqueName ?? undefined,
+          createdAt: c.createdDate ? new Date(c.createdDate) : undefined,
+          url: c.url ?? undefined,
+        }));
+      }
+
+      // Azure CLI does not have a direct work-item comments command; skip gracefully.
+      return [];
+    },
+
+    async updateIssue(
+      identifier: string,
+      update: IssueUpdate,
+      project: ProjectConfig,
+    ): Promise<void> {
+      const settings = getTrackerSettings(project);
+      const id = normalizeIdentifier(identifier);
+      const pat = getPat();
+
+      const patches: Array<{ op: string; path: string; value: unknown }> = [];
+
+      // Handle state change — prefer workflowStateName for exact state, then generic state
+      if (update.workflowStateName) {
+        patches.push({ op: "add", path: "/fields/System.State", value: update.workflowStateName });
+      } else if (update.state) {
+        const stateValue =
+          update.state === "closed"
+            ? "Closed"
+            : update.state === "open"
+              ? "Active"
+              : "Active"; // "in_progress" → Active
+        patches.push({ op: "add", path: "/fields/System.State", value: stateValue });
+      }
+
+      // Handle description update
+      if (update.description !== undefined) {
+        patches.push({
+          op: "add",
+          path: "/fields/System.Description",
+          value: update.description,
+        });
+      }
+
+      // Handle assignee
+      if (update.assignee) {
+        patches.push({ op: "add", path: "/fields/System.AssignedTo", value: update.assignee });
+      }
+
+      // Handle tags (additive — append to existing)
+      if (update.labels && update.labels.length > 0) {
+        const issue = await fetchWorkItem(identifier, project);
+        const existingTags = issue.labels;
+        const merged = [...new Set([...existingTags, ...update.labels])];
+        patches.push({ op: "add", path: "/fields/System.Tags", value: merged.join("; ") });
+      }
+
+      if (patches.length > 0) {
+        if (pat) {
+          const url = new URL(
+            `${settings.organizationUrl}/${encodeURIComponent(settings.projectName)}/_apis/wit/workitems/${id}`,
+          );
+          url.searchParams.set("api-version", API_VERSION);
+          await requestAzureDevOps("PATCH", url, pat, patches, "application/json-patch+json");
+        } else {
+          // Azure CLI path: handle state and description updates individually
+          for (const patch of patches) {
+            if (patch.path === "/fields/System.State") {
+              await az([
+                "boards",
+                "work-item",
+                "update",
+                "--id",
+                id,
+                "--state",
+                String(patch.value),
+                "--org",
+                settings.organizationUrl,
+              ]);
+            } else if (patch.path === "/fields/System.Description") {
+              await az([
+                "boards",
+                "work-item",
+                "update",
+                "--id",
+                id,
+                "--description",
+                String(patch.value),
+                "--org",
+                settings.organizationUrl,
+              ]);
+            }
+          }
+        }
+      }
+
+      // Handle comment (always via REST if PAT available, otherwise az CLI)
+      if (update.comment) {
+        if (pat) {
+          const url = new URL(
+            `${settings.organizationUrl}/${encodeURIComponent(settings.projectName)}/_apis/wit/workitems/${id}/comments`,
+          );
+          url.searchParams.set("api-version", "7.1-preview.3");
+          await requestAzureDevOps("POST", url, pat, { text: update.comment });
+        } else {
+          await az([
+            "boards",
+            "work-item",
+            "update",
+            "--id",
+            id,
+            "--discussion",
+            update.comment,
+            "--org",
+            settings.organizationUrl,
+          ]);
+        }
+      }
     },
   };
 }
