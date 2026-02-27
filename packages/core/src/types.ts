@@ -443,6 +443,9 @@ export interface Tracker {
   /** Optional: list issues with filters */
   listIssues?(filters: IssueFilters, project: ProjectConfig): Promise<Issue[]>;
 
+  /** Optional: list comments on an issue */
+  listComments?(identifier: string, project: ProjectConfig): Promise<IssueComment[]>;
+
   /** Optional: update issue state */
   updateIssue?(identifier: string, update: IssueUpdate, project: ProjectConfig): Promise<void>;
 
@@ -463,6 +466,7 @@ export interface Issue {
 
 export interface IssueFilters {
   state?: "open" | "closed" | "all";
+  workflowStateName?: string;
   labels?: string[];
   assignee?: string;
   limit?: number;
@@ -470,9 +474,20 @@ export interface IssueFilters {
 
 export interface IssueUpdate {
   state?: "open" | "in_progress" | "closed";
+  workflowStateId?: string;
+  workflowStateName?: string;
+  description?: string;
   labels?: string[];
   assignee?: string;
   comment?: string;
+}
+
+export interface IssueComment {
+  id: string;
+  body: string;
+  author?: string;
+  createdAt?: Date;
+  url?: string;
 }
 
 export interface CreateIssueInput {

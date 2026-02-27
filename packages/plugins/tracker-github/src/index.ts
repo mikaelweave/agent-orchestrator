@@ -10,6 +10,7 @@ import type {
   PluginModule,
   Tracker,
   Issue,
+  IssueComment,
   IssueFilters,
   IssueUpdate,
   CreateIssueInput,
@@ -211,6 +212,19 @@ function createGitHubTracker(): Tracker {
         await gh(["issue", "reopen", identifier, "--repo", project.repo]);
       }
 
+      // Handle description update
+      if (update.description !== undefined) {
+        await gh([
+          "issue",
+          "edit",
+          identifier,
+          "--repo",
+          project.repo,
+          "--body",
+          update.description,
+        ]);
+      }
+
       // Handle label changes
       if (update.labels && update.labels.length > 0) {
         await gh([
@@ -249,6 +263,35 @@ function createGitHubTracker(): Tracker {
           update.comment,
         ]);
       }
+    },
+
+    async listComments(identifier: string, project: ProjectConfig): Promise<IssueComment[]> {
+      const raw = await gh([
+        "issue",
+        "comment",
+        "list",
+        identifier,
+        "--repo",
+        project.repo,
+        "--json",
+        "id,body,author,createdAt,url",
+      ]);
+
+      const comments: Array<{
+        id: number;
+        body: string;
+        author: { login: string };
+        createdAt: string;
+        url: string;
+      }> = JSON.parse(raw);
+
+      return comments.map((c) => ({
+        id: String(c.id),
+        body: c.body,
+        author: c.author?.login,
+        createdAt: c.createdAt ? new Date(c.createdAt) : undefined,
+        url: c.url,
+      }));
     },
 
     async createIssue(input: CreateIssueInput, project: ProjectConfig): Promise<Issue> {
